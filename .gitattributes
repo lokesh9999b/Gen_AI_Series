@@ -1,0 +1,5 @@
+# Normalize line endings
+* text=auto eol=lf
+*.py text diff=python
+*.ipynb text diff=json
+*.md text diff=markdown

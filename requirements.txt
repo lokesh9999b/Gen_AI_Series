@@ -1,0 +1,11 @@
+langchain
+langchain-openai
+langchain-anthropic
+dotenv
+langchain-google-genai
+langchain-groq
+streamlit
+langchain-ollama
+langchain-diffbot
+langchain-community
+langgraph
