@@ -65,7 +65,7 @@ Flow is always: `input dict → prompt → messages → model → AIMessage → 
 Requirements: Python 3.11, Git, Jupyter. Ollama only for notebook 4.
 
 ```powershell
-cd C:\Users\91897\Desktop\GENAI-Series
+cd GENAI-Series
 python -m venv env
 .\env\Scripts\activate
 pip install -r requirements.txt
@@ -264,7 +264,7 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 Repo: `https://github.com/lokesh9999b/Gen_AI_Series.git`. This folder is its own repo. Do not run git from home directory.
 
 ```powershell
-cd C:\Users\91897\Desktop\GENAI-Series
+cd GENAI-Series
 git status --short
 git add <files>
 git commit -m "message"
