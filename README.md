@@ -58,7 +58,7 @@ Flow is always: `input dict → prompt → messages → model → AIMessage → 
 5. `notebooks/5_basic_agents.ipynb` — `@tool` + `create_agent` for math.
 6. `notebooks/6_googleSearch_agent.ipynb` — search agent with Serper.
 7. `apps/1_qna_bot.py` — Streamlit chat memory.
-8. `apps/2_googleSearch_agent.py` — CLI search agent with conversation memory.
+8. `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming + conversation memory.
 
 ## 4. Setup
 
@@ -96,7 +96,7 @@ Run:
 ```powershell
 jupyter notebook notebooks
 streamlit run apps\1_qna_bot.py
-python apps\2_googleSearch_agent.py
+streamlit run apps\2_googleSearch_agent.py
 ```
 
 For Ollama:
@@ -112,7 +112,7 @@ ollama serve
 GENAI-Series/
 ├── apps/
 │   ├── 1_qna_bot.py            # Streamlit QnA, ChatGroq openai/gpt-oss-120b, chat history
-│   └── 2_googleSearch_agent.py # CLI Serper + Groq agent, InMemorySaver, thread_id
+│   └── 2_googleSearch_agent.py # Streamlit Serper + Groq agent, MemorySaver, token streaming
 ├── notebooks/
 │   ├── dynamic.ipynb                       # Groq invoke + ChatPromptTemplate + LCEL translator
 │   ├── 1_basic_langchain_wih_openai.ipynb  # OpenAI/Groq/Google/Anthropic invoke, static prompts
@@ -180,11 +180,13 @@ GENAI-Series/
 - `st.chat_input` gets query, appends user msg, calls `llm.invoke(messages)`, appends assistant msg.
 - Lesson: memory here is just passing the full message list each turn.
 
-### `apps/2_googleSearch_agent.py` — CLI agent with memory
+### `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming
 
-- `search = GoogleSerperAPIWrapper()`, `model = ChatGroq(model="openai/gpt-oss-20b", streaming=True)`.
-- `create_agent(model, tools=[...], system_prompt=..., checkpointer=InMemorySaver())`.
-- Loop on `input("User:")`, exit on `quiet`/`exit`, invoke with `{"configurable":{"thread_id":"Lokesh"}}` so follow-ups remember context.
+- `search = GoogleSerperAPIWrapper()`, `model = ChatGroq(model="openai/gpt-oss-20b", temperature=0.5, streaming=True)`.
+- `create_agent(model, tools=[search.run], system_prompt=..., checkpointer=MemorySaver())` with `MemorySaver` kept in `st.session_state` so memory survives Streamlit reruns.
+- Same `thread_id` (`"Lokesh"`) passed as `{"configurable": {"thread_id": "Lokesh"}}` so follow-ups share conversation state.
+- Streams tokens with `agent.stream({...}, {...}, stream_mode="messages")`, accumulating `chunk[0].content` into a `st.empty()` placeholder for live output, then appends the full answer to `st.session_state.history`.
+- Run with `streamlit run apps\2_googleSearch_agent.py` (no longer a `input()` CLI loop).
 
 ## 8. Core patterns with examples
 
