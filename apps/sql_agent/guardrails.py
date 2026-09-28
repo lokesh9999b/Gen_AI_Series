@@ -45,6 +45,11 @@ class Guardrails:
     def is_write(sql: str) -> bool:
         return bool(WRITE_RE.match(sql))
 
+    @staticmethod
+    def normalize(sql: str) -> str:
+        """Canonical form so reworded-but-identical SQL matches approvals."""
+        return re.sub(r"\s+", " ", sql.strip().rstrip(";")).lower()
+
     def check_blocked(self, sql: str) -> str | None:
         """Return a reason if the SQL must never run, else None."""
         if SCHEMA_CHANGE_RE.search(sql):

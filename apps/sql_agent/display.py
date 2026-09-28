@@ -21,6 +21,13 @@ LEADING_SQL_RE = re.compile(r"(?is)^\s*(select|insert|update|delete)\b.*?;\s*")
 TABLE_SEP_RE = re.compile(r"^\|[\s\-\:|]+\|\s*$")
 # The model often retypes timestamps and drops the separating space.
 SMASHED_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2})(\d{2}:\d{2}(?::\d{2})?)")
+# Narrative SQL echoes outside table rows ("... LIMIT10I'm ready ...").
+ECHO_SQL_RE = re.compile(
+    r"(?i)\b(SELECT\s+.+?\s+FROM\s+\S+|INSERT\s+INTO\s+\S+"
+    r"|UPDATE\s+\S+\s+SET\s+|DELETE\s+FROM\s+\S+)"
+)
+# Word/number typos ("Displayed the2 most recent").
+GLUED_NUM_RE = re.compile(r"\b([Tt]he)(\d)")
 
 YES_RE = re.compile(r"^\s*(yes|yeah|yep|confirm|confirmed|proceed|ok|okay)\b", re.IGNORECASE)
 NO_RE = re.compile(r"^\s*(no|nope|cancel|cancelled|canceled|stop|don't|dont)\b", re.IGNORECASE)
@@ -64,6 +71,20 @@ def fix_timestamps(text: str) -> str:
     return SMASHED_TS_RE.sub(r"\1 \2", text)
 
 
+def strip_echoed_sql(text: str) -> str:
+    """Drop narrative lines that quote SQL; table rows are left alone."""
+    kept = []
+    for line in text.split("\n"):
+        if line.strip().startswith("|") or not ECHO_SQL_RE.search(line):
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def fix_glued_words(text: str) -> str:
+    """Restore spaces the model drops between words and numbers."""
+    return GLUED_NUM_RE.sub(r"\1 \2", text)
+
+
 def ensure_table_header(text: str, header: str) -> str:
     """Prepend the header if a markdown table lost its header row."""
     lines = text.split("\n")
@@ -78,4 +99,5 @@ def ensure_table_header(text: str, header: str) -> str:
 
 def finalize(text: str, header: str) -> str:
     """Full repair pipeline applied to the final streamed answer."""
-    return fix_timestamps(ensure_table_header(clean_display(text), header))
+    text = strip_echoed_sql(clean_display(text))
+    return fix_glued_words(fix_timestamps(ensure_table_header(text, header)))

@@ -6,8 +6,10 @@ from sql_agent.display import (
     clean_display,
     ensure_table_header,
     finalize,
+    fix_glued_words,
     fix_timestamps,
     is_display_chunk,
+    strip_echoed_sql,
 )
 
 HEADER = "| id | title | description | status | created_at |"
@@ -67,3 +69,14 @@ def test_finalize_pipeline():
     out = finalize("SELECT * FROM tasks;\n|----|\n|1|a|", HEADER)
     assert out.startswith(HEADER)
     assert "SELECT" not in out
+
+
+def test_strip_echoed_sql():
+    glued = "SELECT id FROM tasks ORDER BY created_at DESC LIMIT10I'm ready, reply yes."
+    assert strip_echoed_sql(glued).strip() == ""
+    rows = "| 4 | Lunch: Biryani |\n| 1 | delete from list |"
+    assert strip_echoed_sql(rows) == rows
+
+
+def test_fix_glued_words():
+    assert fix_glued_words("Displayed the2 most recent tasks.") == "Displayed the 2 most recent tasks."

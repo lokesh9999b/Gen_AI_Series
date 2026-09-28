@@ -32,7 +32,7 @@ def wrap_query_tool(tool, state: dict, guard: Guardrails):
         query = guard.cap_select(query)
 
         if guard.is_write(query):
-            if query not in state["confirmed_writes"]:
+            if guard.normalize(query) not in state["confirmed_writes"]:
                 state["pending_write"] = query
                 return CONFIRM_MESSAGE
         return orig_run(query)

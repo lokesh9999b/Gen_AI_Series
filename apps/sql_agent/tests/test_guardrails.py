@@ -65,6 +65,11 @@ def test_cap_select(guard):
     assert guard.cap_select("SELECT * FROM tasks LIMIT 5").rstrip().endswith("LIMIT 5")
 
 
+def test_normalize():
+    assert Guardrails.normalize("DELETE  FROM tasks;") == Guardrails.normalize("delete from tasks")
+    assert Guardrails.normalize("SELECT *\n  FROM tasks;") == "select * from tasks"
+
+
 def test_scope_is_configurable():
     g = Guardrails(allowed_tables=("orders", "customers"), read_limit=5)
     assert g.check_blocked("SELECT * FROM orders") is None
@@ -88,7 +93,8 @@ def test_tool_confirm_flow(guarded_tool, memory_db):
     sql = "INSERT INTO tasks(title) VALUES ('test')"
     assert "confirmation" in str(tool.invoke({"query": sql})).lower()
     assert state["pending_write"] == sql
-    state["confirmed_writes"].add(sql)
+    from sql_agent.guardrails import Guardrails as _G
+    state["confirmed_writes"].add(_G.normalize(sql))
     tool.invoke({"query": sql})
     assert "test" in str(memory_db.run("SELECT title FROM tasks"))
     assert "test" in str(tool.invoke({"query": "SELECT * FROM tasks"}))
@@ -101,3 +107,27 @@ def test_tool_thread_safe(guarded_tool):
             guarded_tool.invoke, {"query": "DELETE FROM tasks WHERE id IN (4,1)"}
         ).result(timeout=60)
     assert "confirmation" in str(result).lower()
+
+
+def test_run_approved_executes_once(memory_db):
+    """Approval runs the staged SQL directly — no model round-trip, no loop."""
+    from sql_agent.agent import create_guard_state, run_approved
+
+    memory_db.run("INSERT INTO tasks(title) VALUES ('a')")
+    memory_db.run("INSERT INTO tasks(title) VALUES ('b')")
+    state = create_guard_state()
+    state["pending_write"] = "DELETE FROM tasks"
+    note = run_approved(memory_db, state)
+    assert state["pending_write"] is None
+    assert "already ran successfully" in note
+    assert memory_db.run("SELECT COUNT(*) AS c FROM tasks") == "[(0,)]"
+
+
+def test_run_approved_failure(memory_db):
+    from sql_agent.agent import create_guard_state, run_approved
+
+    state = create_guard_state()
+    state["pending_write"] = "DELETE FROM no_such_table"
+    note = run_approved(memory_db, state)
+    assert state["pending_write"] is None
+    assert "failed with database error" in note

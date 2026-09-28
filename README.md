@@ -239,7 +239,7 @@ Or configure via env (`SQL_AGENT_DB_URI`, `SQL_AGENT_TABLES`, `SQL_AGENT_COLUMNS
 
 - **Clean display:** `stream_mode="messages"` yields every intermediate step (draft SQL, tool calls, raw tuples like `[(3, ...)]`). `is_display_chunk()` renders only plain assistant text (`AIMessageChunk` without tool calls; `ToolMessage`s skipped), then `finalize()` strips echoed SQL, repairs a missing table header, and restores timestamp spacing — the chat shows just the markdown table + summary, never SQL.
 - **Guardrails** (`Guardrails` + `wrap_query_tool` around `sql_db_query`):
-  1. *Confirm-on-write* — first `INSERT`/`UPDATE`/`DELETE` is staged in `pending_write`; the agent asks for yes/no. Confirm (button or typing yes) runs it; Cancel drops it. Each exact SQL is remembered in `confirmed_writes`. State is a plain module-level dict because tools run in a worker thread where `st.session_state` raises `KeyError`.
+  1. *Confirm-on-write* — first `INSERT`/`UPDATE`/`DELETE` is staged in `pending_write`; the agent asks once (naming exact titles). On yes/Confirm the staged SQL runs **directly in code** (`run_approved`) — never via a regenerated model query, so reworded retries can't restart the loop — then the agent re-queries and summarizes. Cancel drops it. Approvals are matched on normalized SQL (case/space/semicolon-insensitive). State is a plain module-level dict because tools run in a worker thread where `st.session_state` raises `KeyError`.
   2. *Blocklist* — `DROP`/`TRUNCATE`/`ALTER`/`ATTACH`/`DETACH`/`PRAGMA`/`VACUUM`, multi-statement (`;` stacking), `--` and `/*` comments are rejected before touching the DB.
   3. *Scope* — only `allowed_tables`; other tables/statements rejected; `SELECT` without `LIMIT` gets one appended.
   4. *Output hygiene* — system prompt forbids showing SQL, tool names, or raw tuples.
@@ -321,6 +321,8 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 9. `groq.BadRequestError 400 output_parse_failed, failed_generation: ''` in the SQL agent — `openai/gpt-oss-20b` can't reliably do the toolkit's tool-calling and returns empty output. Use `openai/gpt-oss-120b` with `temperature=0`.
 10. Agent chat shows raw SQL + `[(...)]` tuples — `stream_mode="messages"` streams intermediate steps too. Filter to final-answer text only (see `is_display_chunk` in `apps/sql_agent/display.py`), and tell the model never to show SQL.
 11. `KeyError: st.session_state has no key ...` inside a tool — tools run in a LangGraph worker thread without Streamlit context. Keep tool state in a plain module dict (see `tools.py`), never touch session state there.
+12. `groq.APIError: Tool call validation failed ... 'sql_db_query<|channel|>commentary'` — transient gpt-oss/Groq glitch where the model leaks Harmony control tokens into a tool name. The app (`app.py:render_answer`) retries the turn once and shows a friendly message instead of crashing; just ask again.
+13. Traceback paths mentioning `apps/3_sql_agent.py` — that file was deleted and replaced by `apps/sql_agent/app.py`. You have the old app still running: stop it (`Ctrl+C`) and start the new one (see Run section).
 
 ## 11. Git and GitHub
 
