@@ -59,7 +59,7 @@ Flow is always: `input dict → prompt → messages → model → AIMessage → 
 6. `notebooks/6_googleSearch_agent.ipynb` — search agent with Serper.
 7. `apps/1_qna_bot.py` — Streamlit chat memory.
 8. `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming + conversation memory.
-9. `apps/3_sql_agent.py` — Streamlit SQL task agent with guardrails (confirm-on-write, blocklist, tasks-only scope).
+9. `apps/sql_agent/` — SQL task agent package: Streamlit UI + guardrails + tests (see below).
 
 ## 4. Setup
 
@@ -98,7 +98,13 @@ Run:
 jupyter notebook notebooks
 streamlit run apps\1_qna_bot.py
 streamlit run apps\2_googleSearch_agent.py
-streamlit run apps\3_sql_agent.py
+streamlit run apps\sql_agent\app.py
+```
+
+Test the SQL agent package (no API keys needed):
+
+```powershell
+.\env\Scripts\python -m pytest apps\sql_agent\tests -q
 ```
 
 For Ollama:
@@ -115,7 +121,7 @@ GENAI-Series/
 ├── apps/
 │   ├── 1_qna_bot.py            # Streamlit QnA, ChatGroq openai/gpt-oss-120b, chat history
 │   ├── 2_googleSearch_agent.py # Streamlit Serper + Groq agent, MemorySaver, token streaming
-│   └── 3_sql_agent.py          # Streamlit SQL tasks agent, guardrails, clean display
+│   └── sql_agent/              # SQL agent package (see section 7): config, guardrails, tests
 ├── notebooks/
 │   ├── dynamic.ipynb                       # Groq invoke + ChatPromptTemplate + LCEL translator
 │   ├── 1_basic_langchain_wih_openai.ipynb  # OpenAI/Groq/Google/Anthropic invoke, static prompts
@@ -191,16 +197,53 @@ GENAI-Series/
 - Streams tokens with `agent.stream({...}, {...}, stream_mode="messages")`, accumulating `chunk[0].content` into a `st.empty()` placeholder for live output, then appends the full answer to `st.session_state.history`.
 - Run with `streamlit run apps\2_googleSearch_agent.py` (no longer a `input()` CLI loop).
 
-### `apps/3_sql_agent.py` — Streamlit SQL task agent with guardrails
+### `apps/sql_agent/` — SQL agent package (DB-agnostic, guarded)
 
-- SQLite `tasks` table auto-created in `apps/my_tasks.db`; `ChatGroq(model="openai/gpt-oss-120b", temperature=0, streaming=True)` + `SQLDatabaseToolkit` + `create_agent` with `MemorySaver` and `thread_id "1"`.
-- **Clean display:** `stream_mode="messages"` yields every intermediate step (draft SQL, tool calls, raw tuples like `[(3, ...)]`). `is_display_chunk()` renders only plain assistant text — tool-call chunks and `ToolMessage`s are skipped — so the chat shows just the markdown table + summary, never SQL.
-- **Guardrails** (`wrap_query_tool` around `sql_db_query`):
-  1. *Confirm-on-write* — first `INSERT`/`UPDATE`/`DELETE` is staged in `pending_write`; the agent asks for yes/no. Confirm (button or typing yes) runs it; Cancel drops it. Each exact SQL is remembered in `confirmed_writes`.
+```text
+apps/sql_agent/
+├── __init__.py    # public API: build_agent, load_config, ...
+├── config.py      # SQLAgentConfig — env-driven settings, no hardcoded DB
+├── db.py          # get_db(uri) for sqlite/postgres/mysql + demo tasks schema
+├── guardrails.py  # pure policy: blocklist, table scope, SELECT cap
+├── tools.py       # wrap_query_tool — same-named guarded replacement
+├── display.py     # stream filter + answer repair (header, timestamps, SQL strip)
+├── agent.py       # build_agent() assembly + system prompt
+├── app.py         # thin Streamlit UI (history, confirm/cancel, streaming)
+└── tests/         # pytest suite, no API keys needed
+```
+
+How the pieces fit: `app.py` loads `config` → connects `db` → `agent.build_agent` wraps the toolkit's `sql_db_query` with `tools`+`guardrails` → UI streams via `display` helpers. Each module imports only what it needs, so developers reuse pieces without Streamlit.
+
+**Use it with your own database** (5 lines, no Streamlit needed):
+
+```python
+from sql_agent import build_agent, create_guard_state, load_config
+from sql_agent.db import get_db
+from langgraph.checkpoint.memory import MemorySaver
+
+config = load_config()
+config.db_uri = "postgresql://user:pass@localhost:5432/mydb"
+config.allowed_tables = ("orders", "customers")
+config.table_columns = ("id", "total", "status", "created_at")
+config.init_demo_schema = False  # you own the schema
+
+agent, _ = build_agent(get_db(config.db_uri), config, create_guard_state(), MemorySaver())
+out = agent.invoke(
+    {"messages": [{"role": "user", "content": "show the 5 latest orders"}]},
+    {"configurable": {"thread_id": "user-42"}},
+)
+print(out["messages"][-1].content)
+```
+
+Or configure via env (`SQL_AGENT_DB_URI`, `SQL_AGENT_TABLES`, `SQL_AGENT_COLUMNS`, `SQL_AGENT_MODEL`, `SQL_AGENT_READ_LIMIT`, `SQL_AGENT_THREAD_ID`, `SQL_AGENT_INIT_DEMO`) and run `streamlit run apps\sql_agent\app.py`.
+
+- **Clean display:** `stream_mode="messages"` yields every intermediate step (draft SQL, tool calls, raw tuples like `[(3, ...)]`). `is_display_chunk()` renders only plain assistant text (`AIMessageChunk` without tool calls; `ToolMessage`s skipped), then `finalize()` strips echoed SQL, repairs a missing table header, and restores timestamp spacing — the chat shows just the markdown table + summary, never SQL.
+- **Guardrails** (`Guardrails` + `wrap_query_tool` around `sql_db_query`):
+  1. *Confirm-on-write* — first `INSERT`/`UPDATE`/`DELETE` is staged in `pending_write`; the agent asks for yes/no. Confirm (button or typing yes) runs it; Cancel drops it. Each exact SQL is remembered in `confirmed_writes`. State is a plain module-level dict because tools run in a worker thread where `st.session_state` raises `KeyError`.
   2. *Blocklist* — `DROP`/`TRUNCATE`/`ALTER`/`ATTACH`/`DETACH`/`PRAGMA`/`VACUUM`, multi-statement (`;` stacking), `--` and `/*` comments are rejected before touching the DB.
-  3. *Scope* — only the `tasks` table; `SELECT` must read `FROM tasks`, writes must mention `tasks`, other statements rejected; `SELECT` without `LIMIT` gets `LIMIT 10` appended.
+  3. *Scope* — only `allowed_tables`; other tables/statements rejected; `SELECT` without `LIMIT` gets one appended.
   4. *Output hygiene* — system prompt forbids showing SQL, tool names, or raw tuples.
-- Run with `streamlit run apps\3_sql_agent.py`.
+- Demo: SQLite `tasks` table auto-created at `apps/my_tasks.db` (git-ignored).
 
 ## 8. Core patterns with examples
 
@@ -274,9 +317,10 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 5. `print(res.content)` fails on chains — chains ending in `StrOutputParser` return `str`. Use `print(res)`.
 6. Ollama errors — run `ollama serve`, `ollama pull gemma3`.
 7. Math/LaTeX looks raw — expected with `print()`. Use `display(Markdown(...))` in Jupyter.
-8. `sqlite3.OperationalError: near "ON"` on table creation — `ON UPDATE CURRENT_TIMESTAMP` is MySQL syntax, SQLite rejects it. Use plain `DEFAULT CURRENT_TIMESTAMP` (`apps/3_sql_agent.py`).
+8. `sqlite3.OperationalError: near "ON"` on table creation — `ON UPDATE CURRENT_TIMESTAMP` is MySQL syntax, SQLite rejects it. Use plain `DEFAULT CURRENT_TIMESTAMP` (see `apps/sql_agent/db.py`).
 9. `groq.BadRequestError 400 output_parse_failed, failed_generation: ''` in the SQL agent — `openai/gpt-oss-20b` can't reliably do the toolkit's tool-calling and returns empty output. Use `openai/gpt-oss-120b` with `temperature=0`.
-10. Agent chat shows raw SQL + `[(...)]` tuples — `stream_mode="messages"` streams intermediate steps too. Filter to final-answer text only (see `is_display_chunk` in `apps/3_sql_agent.py`), and tell the model never to show SQL.
+10. Agent chat shows raw SQL + `[(...)]` tuples — `stream_mode="messages"` streams intermediate steps too. Filter to final-answer text only (see `is_display_chunk` in `apps/sql_agent/display.py`), and tell the model never to show SQL.
+11. `KeyError: st.session_state has no key ...` inside a tool — tools run in a LangGraph worker thread without Streamlit context. Keep tool state in a plain module dict (see `tools.py`), never touch session state there.
 
 ## 11. Git and GitHub
 

@@ -9,3 +9,4 @@ langchain-ollama
 langchain-diffbot
 langchain_community
 langgraph
+pytest
