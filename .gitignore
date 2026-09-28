@@ -15,6 +15,11 @@ notebooks/.env
 *.pem
 *.key
 
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
 # Jupyter
 .ipynb_checkpoints/
 */.ipynb_checkpoints/*

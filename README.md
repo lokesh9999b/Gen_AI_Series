@@ -59,6 +59,7 @@ Flow is always: `input dict → prompt → messages → model → AIMessage → 
 6. `notebooks/6_googleSearch_agent.ipynb` — search agent with Serper.
 7. `apps/1_qna_bot.py` — Streamlit chat memory.
 8. `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming + conversation memory.
+9. `apps/3_sql_agent.py` — Streamlit SQL task agent with guardrails (confirm-on-write, blocklist, tasks-only scope).
 
 ## 4. Setup
 
@@ -97,6 +98,7 @@ Run:
 jupyter notebook notebooks
 streamlit run apps\1_qna_bot.py
 streamlit run apps\2_googleSearch_agent.py
+streamlit run apps\3_sql_agent.py
 ```
 
 For Ollama:
@@ -112,7 +114,8 @@ ollama serve
 GENAI-Series/
 ├── apps/
 │   ├── 1_qna_bot.py            # Streamlit QnA, ChatGroq openai/gpt-oss-120b, chat history
-│   └── 2_googleSearch_agent.py # Streamlit Serper + Groq agent, MemorySaver, token streaming
+│   ├── 2_googleSearch_agent.py # Streamlit Serper + Groq agent, MemorySaver, token streaming
+│   └── 3_sql_agent.py          # Streamlit SQL tasks agent, guardrails, clean display
 ├── notebooks/
 │   ├── dynamic.ipynb                       # Groq invoke + ChatPromptTemplate + LCEL translator
 │   ├── 1_basic_langchain_wih_openai.ipynb  # OpenAI/Groq/Google/Anthropic invoke, static prompts
@@ -188,6 +191,17 @@ GENAI-Series/
 - Streams tokens with `agent.stream({...}, {...}, stream_mode="messages")`, accumulating `chunk[0].content` into a `st.empty()` placeholder for live output, then appends the full answer to `st.session_state.history`.
 - Run with `streamlit run apps\2_googleSearch_agent.py` (no longer a `input()` CLI loop).
 
+### `apps/3_sql_agent.py` — Streamlit SQL task agent with guardrails
+
+- SQLite `tasks` table auto-created in `apps/my_tasks.db`; `ChatGroq(model="openai/gpt-oss-120b", temperature=0, streaming=True)` + `SQLDatabaseToolkit` + `create_agent` with `MemorySaver` and `thread_id "1"`.
+- **Clean display:** `stream_mode="messages"` yields every intermediate step (draft SQL, tool calls, raw tuples like `[(3, ...)]`). `is_display_chunk()` renders only plain assistant text — tool-call chunks and `ToolMessage`s are skipped — so the chat shows just the markdown table + summary, never SQL.
+- **Guardrails** (`wrap_query_tool` around `sql_db_query`):
+  1. *Confirm-on-write* — first `INSERT`/`UPDATE`/`DELETE` is staged in `pending_write`; the agent asks for yes/no. Confirm (button or typing yes) runs it; Cancel drops it. Each exact SQL is remembered in `confirmed_writes`.
+  2. *Blocklist* — `DROP`/`TRUNCATE`/`ALTER`/`ATTACH`/`DETACH`/`PRAGMA`/`VACUUM`, multi-statement (`;` stacking), `--` and `/*` comments are rejected before touching the DB.
+  3. *Scope* — only the `tasks` table; `SELECT` must read `FROM tasks`, writes must mention `tasks`, other statements rejected; `SELECT` without `LIMIT` gets `LIMIT 10` appended.
+  4. *Output hygiene* — system prompt forbids showing SQL, tool names, or raw tuples.
+- Run with `streamlit run apps\3_sql_agent.py`.
+
 ## 8. Core patterns with examples
 
 Direct message call:
@@ -260,6 +274,9 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 5. `print(res.content)` fails on chains — chains ending in `StrOutputParser` return `str`. Use `print(res)`.
 6. Ollama errors — run `ollama serve`, `ollama pull gemma3`.
 7. Math/LaTeX looks raw — expected with `print()`. Use `display(Markdown(...))` in Jupyter.
+8. `sqlite3.OperationalError: near "ON"` on table creation — `ON UPDATE CURRENT_TIMESTAMP` is MySQL syntax, SQLite rejects it. Use plain `DEFAULT CURRENT_TIMESTAMP` (`apps/3_sql_agent.py`).
+9. `groq.BadRequestError 400 output_parse_failed, failed_generation: ''` in the SQL agent — `openai/gpt-oss-20b` can't reliably do the toolkit's tool-calling and returns empty output. Use `openai/gpt-oss-120b` with `temperature=0`.
+10. Agent chat shows raw SQL + `[(...)]` tuples — `stream_mode="messages"` streams intermediate steps too. Filter to final-answer text only (see `is_display_chunk` in `apps/3_sql_agent.py`), and tell the model never to show SQL.
 
 ## 11. Git and GitHub
 

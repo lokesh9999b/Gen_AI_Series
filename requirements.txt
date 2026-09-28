@@ -7,5 +7,5 @@ langchain-groq
 streamlit
 langchain-ollama
 langchain-diffbot
-langchain-community
+langchain_community
 langgraph
