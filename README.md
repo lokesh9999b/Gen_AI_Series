@@ -92,7 +92,7 @@ HUGGINGFACEHUB_API_KEY=
 SERPER_API_KEY=
 ```
 
-Run:
+Run (from the repo root — the folder containing `requirements.txt`):
 
 ```powershell
 jupyter notebook notebooks
@@ -237,7 +237,8 @@ print(out["messages"][-1].content)
 
 Or configure via env (`SQL_AGENT_DB_URI`, `SQL_AGENT_TABLES`, `SQL_AGENT_COLUMNS`, `SQL_AGENT_MODEL`, `SQL_AGENT_READ_LIMIT`, `SQL_AGENT_THREAD_ID`, `SQL_AGENT_INIT_DEMO`) and run `streamlit run apps\sql_agent\app.py`.
 
-- **Clean display:** `stream_mode="messages"` yields every intermediate step (draft SQL, tool calls, raw tuples like `[(3, ...)]`). `is_display_chunk()` renders only plain assistant text (`AIMessageChunk` without tool calls; `ToolMessage`s skipped), then `finalize()` strips echoed SQL, repairs a missing table header, and restores timestamp spacing — the chat shows just the markdown table + summary, never SQL.
+- **Clean display:** `stream_mode="messages"` yields every intermediate step (draft SQL, tool calls, raw tuples like `[(3, ...)]`). `is_display_chunk()` renders only plain assistant text (`AIMessageChunk` without tool calls; `ToolMessage`s skipped), then `finalize()` strips echoed SQL (fences, full lines, narrative echoes), repairs a missing table header, and restores timestamp spacing and glued words (`the2` → `the 2`) — the chat shows just the markdown table + summary, never SQL.
+- **Resilience:** `render_answer` retries once on transient model errors and never shows a traceback; empty answers fall back to a "please rephrase" message. A bare yes with nothing staged nudges the model to call the tool instead of looping.
 - **Guardrails** (`Guardrails` + `wrap_query_tool` around `sql_db_query`):
   1. *Confirm-on-write* — first `INSERT`/`UPDATE`/`DELETE` is staged in `pending_write`; the agent asks once (naming exact titles). On yes/Confirm the staged SQL runs **directly in code** (`run_approved`) — never via a regenerated model query, so reworded retries can't restart the loop — then the agent re-queries and summarizes. Cancel drops it. Approvals are matched on normalized SQL (case/space/semicolon-insensitive). State is a plain module-level dict because tools run in a worker thread where `st.session_state` raises `KeyError`.
   2. *Blocklist* — `DROP`/`TRUNCATE`/`ALTER`/`ATTACH`/`DETACH`/`PRAGMA`/`VACUUM`, multi-statement (`;` stacking), `--` and `/*` comments are rejected before touching the DB.
@@ -323,6 +324,7 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 11. `KeyError: st.session_state has no key ...` inside a tool — tools run in a LangGraph worker thread without Streamlit context. Keep tool state in a plain module dict (see `tools.py`), never touch session state there.
 12. `groq.APIError: Tool call validation failed ... 'sql_db_query<|channel|>commentary'` — transient gpt-oss/Groq glitch where the model leaks Harmony control tokens into a tool name. The app (`app.py:render_answer`) retries the turn once and shows a friendly message instead of crashing; just ask again.
 13. Traceback paths mentioning `apps/3_sql_agent.py` — that file was deleted and replaced by `apps/sql_agent/app.py`. You have the old app still running: stop it (`Ctrl+C`) and start the new one (see Run section).
+14. `Error: Invalid value: File does not exist: apps\sql_agent\app.py` — your terminal is inside `apps\`, so the relative path fails. Either `cd ..` back to the repo root first, or run `streamlit run sql_agent\app.py` from `apps\`.
 
 ## 11. Git and GitHub
 
