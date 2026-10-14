@@ -30,6 +30,7 @@ If you are new: read this file top to bottom, then run the notebooks in the orde
 - Custom tools with `@tool` and math agents with `create_agent`.
 - Web-search agents with Serper + Groq.
 - Local models with Ollama.
+- RAG agent: PDF loader → splitter → embeddings → vector store → `retriever_tool` + Groq (notebook 14, no OpenAI key).
 - Streamlit chat app with history.
 - Common errors: wrong model name 404, missing `SERPER_API_KEY`, `langchain-community` deprecation, empty output.
 
@@ -57,13 +58,14 @@ Flow is always: `input dict → prompt → messages → model → AIMessage → 
 4. `notebooks/4_ollama.ipynb` — same code, local model, no API key.
 5. `notebooks/5_basic_agents.ipynb` — `@tool` + `create_agent` for math.
 6. `notebooks/6_googleSearch_agent.ipynb` — search agent with Serper.
+7. `notebooks/14_rag_ai_agent.ipynb` — RAG agent: PDF → chunks → Ollama embeddings → vector store → Groq `retriever_tool` agent.
 7. `apps/1_qna_bot.py` — Streamlit chat memory.
 8. `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming + conversation memory.
 9. `apps/sql_agent/` — SQL task agent package: Streamlit UI + guardrails + tests (see below).
 
 ## 4. Setup
 
-Requirements: Python 3.11, Git, Jupyter. Ollama only for notebook 4.
+Requirements: Python 3.11, Git, Jupyter. Ollama for notebook 4 (chat) and notebook 14 (embeddings).
 
 ```powershell
 cd GENAI-Series
@@ -73,6 +75,8 @@ pip install -r requirements.txt
 ```
 
 `requirements.txt` installs: `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`, `langchain-groq`, `langchain-ollama`, `langchain-community`, `langchain-diffbot`, `langgraph`, `streamlit`, `dotenv` (use `python-dotenv` if `dotenv` fails).
+
+Notebook 14 additionally needs `pypdf` for `PyPDFLoader` (`pip install pypdf`).
 
 Env keys — copy and fill only what you use:
 
@@ -111,6 +115,7 @@ For Ollama:
 
 ```powershell
 ollama pull gemma3
+ollama pull nomic-embed-text
 ollama serve
 ```
 
@@ -128,7 +133,8 @@ GENAI-Series/
 │   ├── 3_structured_output.ipynb           # Pydantic structured output, openai/gpt-oss-120b
 │   ├── 4_ollama.ipynb                      # Local ChatOllama gemma3
 │   ├── 5_basic_agents.ipynb                # @tool math functions + create_agent
-│   └── 6_googleSearch_agent.ipynb          # GoogleSerperAPIWrapper + Groq search agent
+│   ├── 6_googleSearch_agent.ipynb          # GoogleSerperAPIWrapper + Groq search agent
+│   └── 14_rag_ai_agent.ipynb               # RAG agent: Groq chat + Ollama embeddings + InMemoryVectorStore
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore   # ignores env/, .env, __pycache__, checkpoints
@@ -179,6 +185,13 @@ GENAI-Series/
 - `GoogleSerperAPIWrapper()` needs `SERPER_API_KEY`.
 - `create_agent(model, tools=[...], system_prompt="you are a google search agent...")`.
 - Same invoke shape as math agent. Good reference for grounding answers in live search.
+
+### `14_rag_ai_agent.ipynb` — RAG agent (no OpenAI key needed)
+
+- Chat: `ChatGroq(model="openai/gpt-oss-120b", temperature=0)` — 120b for reliable tool-calling (20b drops tool calls, see Troubleshooting 9).
+- Embeddings: Groq has no embeddings API, so `OllamaEmbeddings(model="nomic-embed-text")` with `ollama pull nomic-embed-text`. Needs `pypdf` for `PyPDFLoader`.
+- Flow: `PyPDFLoader("../data/medical_report.pdf")` (9 pages) → `RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)` (26 chunks) → `InMemoryVectorStore.from_documents()` → `@tool retriever_tool` (`similarity_search(k=4)`) → `create_agent(llm, tools=[retriever_tool])`.
+- Ask: `agent.invoke({"messages":[{"role":"user","content":"What is the name of patient..."}]})`, answer in `response["messages"][-1].content`.
 
 ## 7. Apps explained
 
@@ -301,7 +314,8 @@ print(r["messages"][-1].content)
 | Where | Model string | Provider | Notes |
 |---|---|---|---|
 | Groq default | `openai/gpt-oss-20b` | Groq | Fast, used in dynamic/5/6/2 |
-| Groq large | `openai/gpt-oss-120b` | Groq | Structured output, QnA app |
+| Groq large | `openai/gpt-oss-120b` | Groq | Structured output, QnA app, RAG agent 14 (reliable tool-calling) |
+| Embeddings (local, free) | `nomic-embed-text` | Ollama (`OllamaEmbeddings`) | Used in notebook 14; needs `ollama pull nomic-embed-text`, no API key |
 | OpenAI | `gpt-4o` | OpenAI | Needs `OPENAI_API_KEY` |
 | Google | `chat-bison-001` | Google | Legacy name, may need update |
 | Anthropic | `claude-3.0` | Anthropic | Needs key |
@@ -316,7 +330,7 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 3. `DeprecationWarning: langchain-community is being sunset` on `from langchain_community.utilities import GoogleSerperAPIWrapper` — warning only. Migrate to standalone integration package when ready.
 4. Empty output (`"\n"`) — model returned little, or system prompt too strict. Simplify prompt, check `res.content`.
 5. `print(res.content)` fails on chains — chains ending in `StrOutputParser` return `str`. Use `print(res)`.
-6. Ollama errors — run `ollama serve`, `ollama pull gemma3`.
+6. Ollama errors — run `ollama serve`, `ollama pull gemma3`. For notebook 14 also `ollama pull nomic-embed-text`.
 7. Math/LaTeX looks raw — expected with `print()`. Use `display(Markdown(...))` in Jupyter.
 8. `sqlite3.OperationalError: near "ON"` on table creation — `ON UPDATE CURRENT_TIMESTAMP` is MySQL syntax, SQLite rejects it. Use plain `DEFAULT CURRENT_TIMESTAMP` (see `apps/sql_agent/db.py`).
 9. `groq.BadRequestError 400 output_parse_failed, failed_generation: ''` in the SQL agent — `openai/gpt-oss-20b` can't reliably do the toolkit's tool-calling and returns empty output. Use `openai/gpt-oss-120b` with `temperature=0`.
@@ -325,6 +339,8 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 12. `groq.APIError: Tool call validation failed ... 'sql_db_query<|channel|>commentary'` — transient gpt-oss/Groq glitch where the model leaks Harmony control tokens into a tool name. The app (`app.py:render_answer`) retries the turn once and shows a friendly message instead of crashing; just ask again.
 13. Traceback paths mentioning `apps/3_sql_agent.py` — that file was deleted and replaced by `apps/sql_agent/app.py`. You have the old app still running: stop it (`Ctrl+C`) and start the new one (see Run section).
 14. `Error: Invalid value: File does not exist: apps\sql_agent\app.py` — your terminal is inside `apps\`, so the relative path fails. Either `cd ..` back to the repo root first, or run `streamlit run sql_agent\app.py` from `apps\`.
+15. `ImportError: pypdf package not found` at `PyPDFLoader(...).load()` in notebook 14 — fix with `pip install pypdf`.
+16. `ResponseError: pull model manifest: model 'nomic-embed-text' not found` in notebook 14 — the Ollama embedding model is not pulled yet. Fix with `ollama pull nomic-embed-text` (Ollama must be running).
 
 ## 11. Git and GitHub
 
@@ -350,4 +366,4 @@ Keys in `.env` are secrets. If a key was committed, pasted in a screenshot, or p
 - Add `thread_id` per user in QnA bot instead of one global list.
 - Try `openai/gpt-oss-120b` vs `20b` on structured tasks and note accuracy/latency.
 - Replace Serper import with current standalone package and compare.
-- Add a RAG notebook (loader → splitter → vector store → retriever → chain).
+- Extend the RAG agent in `notebooks/14_rag_ai_agent.ipynb` (PDF → splitter → `OllamaEmbeddings` → vector store → `retriever_tool`): try larger `k`, chunk-size tuning, and persistent vector stores.
