@@ -33,3 +33,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Local uploaded PDFs for RAG app — keep local only, never commit
+apps/doc_files/
+*.pdf

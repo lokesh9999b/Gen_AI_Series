@@ -10,3 +10,5 @@ langchain-diffbot
 langchain_community
 langgraph
 pytest
+pydantic
+ipython

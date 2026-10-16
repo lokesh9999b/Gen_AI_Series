@@ -31,6 +31,8 @@ If you are new: read this file top to bottom, then run the notebooks in the orde
 - Web-search agents with Serper + Groq.
 - Local models with Ollama.
 - RAG agent: PDF loader → splitter → embeddings → vector store → `retriever_tool` + Groq (notebook 14, no OpenAI key).
+- LangGraph basics: `StateGraph` + `START`/`END` → `compile()` → `invoke()` → `draw_mermaid_png()` (notebook `langraph_basic.ipynb`).
+- LangGraph chatbot with persistent memory (`InMemorySaver`, `thread_id`) and Streamlit PDF RAG app that uploads PDFs to local `apps/doc_files/` (git-ignored) and answers via a `retrieve_context` tool.
 - Streamlit chat app with history.
 - Common errors: wrong model name 404, missing `SERPER_API_KEY`, `langchain-community` deprecation, empty output.
 
@@ -59,9 +61,12 @@ Flow is always: `input dict → prompt → messages → model → AIMessage → 
 5. `notebooks/5_basic_agents.ipynb` — `@tool` + `create_agent` for math.
 6. `notebooks/6_googleSearch_agent.ipynb` — search agent with Serper.
 7. `notebooks/14_rag_ai_agent.ipynb` — RAG agent: PDF → chunks → Ollama embeddings → vector store → Groq `retriever_tool` agent.
-7. `apps/1_qna_bot.py` — Streamlit chat memory.
-8. `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming + conversation memory.
-9. `apps/sql_agent/` — SQL task agent package: Streamlit UI + guardrails + tests (see below).
+8. `notebooks/langraph_basic.ipynb` — LangGraph `StateGraph` intro (greet node, `START` → `greet` → `END`, `draw_mermaid_png()`). Start here for LangGraph.
+9. `apps/langgraph_qnaChatbot.py` — CLI LangGraph chatbot with `InMemorySaver` memory.
+10. `apps/5_ragPdfAgent.py` — Streamlit PDF RAG: upload PDFs to local `apps/doc_files/` (git-ignored), then chat via `retrieve_context` tool.
+11. `apps/1_qna_bot.py` — Streamlit chat memory.
+12. `apps/2_googleSearch_agent.py` — Streamlit search agent with streaming + conversation memory.
+13. `apps/sql_agent/` — SQL task agent package: Streamlit UI + guardrails + tests (see below).
 
 ## 4. Setup
 
@@ -74,9 +79,9 @@ python -m venv env
 pip install -r requirements.txt
 ```
 
-`requirements.txt` installs: `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`, `langchain-groq`, `langchain-ollama`, `langchain-community`, `langchain-diffbot`, `langgraph`, `streamlit`, `dotenv` (use `python-dotenv` if `dotenv` fails).
+`requirements.txt` installs: `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`, `langchain-groq`, `langchain-ollama`, `langchain-community`, `langchain-diffbot`, `langgraph`, `streamlit`, `pydantic`, `ipython` (for `draw_mermaid_png()` graph images), `dotenv` (use `python-dotenv` if `dotenv` fails).
 
-Notebook 14 additionally needs `pypdf` for `PyPDFLoader` (`pip install pypdf`).
+Notebook 14 and `apps/5_ragPdfAgent.py` additionally need `pypdf` for `PyPDFLoader` / `PyPDFDirectoryLoader` (`pip install pypdf`).
 
 Env keys — copy and fill only what you use:
 
@@ -102,7 +107,9 @@ Run (from the repo root — the folder containing `requirements.txt`):
 jupyter notebook notebooks
 streamlit run apps\1_qna_bot.py
 streamlit run apps\2_googleSearch_agent.py
+streamlit run apps\5_ragPdfAgent.py
 streamlit run apps\sql_agent\app.py
+python apps\langgraph_qnaChatbot.py
 ```
 
 Test the SQL agent package (no API keys needed):
@@ -126,6 +133,9 @@ GENAI-Series/
 ├── apps/
 │   ├── 1_qna_bot.py            # Streamlit QnA, ChatGroq openai/gpt-oss-120b, chat history
 │   ├── 2_googleSearch_agent.py # Streamlit Serper + Groq agent, MemorySaver, token streaming
+│   ├── 5_ragPdfAgent.py        # Streamlit PDF RAG: upload to doc_files/ → retrieve_context tool + Groq 120b
+│   ├── langgraph_qnaChatbot.py # CLI LangGraph chatbot, InMemorySaver, thread memory
+│   ├── doc_files/              # Local-only uploaded PDFs for 5_ragPdfAgent (git-ignored, never commit)
 │   └── sql_agent/              # SQL agent package (see section 7): config, guardrails, tests
 ├── notebooks/
 │   ├── dynamic.ipynb                       # Groq invoke + ChatPromptTemplate + LCEL translator
@@ -134,6 +144,7 @@ GENAI-Series/
 │   ├── 4_ollama.ipynb                      # Local ChatOllama gemma3
 │   ├── 5_basic_agents.ipynb                # @tool math functions + create_agent
 │   ├── 6_googleSearch_agent.ipynb          # GoogleSerperAPIWrapper + Groq search agent
+│   ├── langraph_basic.ipynb                # LangGraph StateGraph intro: greet node + draw_mermaid_png()
 │   └── 14_rag_ai_agent.ipynb               # RAG agent: Groq chat + Ollama embeddings + InMemoryVectorStore
 ├── requirements.txt
 ├── .env.example
@@ -193,6 +204,13 @@ GENAI-Series/
 - Flow: `PyPDFLoader("../data/medical_report.pdf")` (9 pages) → `RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)` (26 chunks) → `InMemoryVectorStore.from_documents()` → `@tool retriever_tool` (`similarity_search(k=4)`) → `create_agent(llm, tools=[retriever_tool])`.
 - Ask: `agent.invoke({"messages":[{"role":"user","content":"What is the name of patient..."}]})`, answer in `response["messages"][-1].content`.
 
+### `langraph_basic.ipynb` — LangGraph StateGraph intro
+
+- `class GreetState(BaseModel): message: str` is the shared state.
+- `graph = StateGraph(GreetState)`, `graph.add_node("greet", Greet)`, `graph.add_edge(START, "greet")`, `graph.add_edge("greet", END)`, `finalGraph = graph.compile()`.
+- `finalGraph.invoke({"message": "Hello"})` returns the updated state dict.
+- Visualize with `from IPython.display import Image; Image(finalGraph.get_graph().draw_mermaid_png())` — note `draw_mermaid_png()` is a method on `get_graph()`, not a standalone function (see Troubleshooting 17).
+
 ## 7. Apps explained
 
 ### `apps/1_qna_bot.py` — Streamlit chat
@@ -209,6 +227,22 @@ GENAI-Series/
 - Same `thread_id` (`"Lokesh"`) passed as `{"configurable": {"thread_id": "Lokesh"}}` so follow-ups share conversation state.
 - Streams tokens with `agent.stream({...}, {...}, stream_mode="messages")`, accumulating `chunk[0].content` into a `st.empty()` placeholder for live output, then appends the full answer to `st.session_state.history`.
 - Run with `streamlit run apps\2_googleSearch_agent.py` (no longer a `input()` CLI loop).
+
+### `apps/langgraph_qnaChatbot.py` — CLI LangGraph chatbot with memory
+
+- `class ChatState(BaseModel): messages: Annotated[list, add_messages]` accumulates history.
+- `ChatGroq(model="openai/gpt-oss-120b")` in `chatBotNode`: `llm.invoke(state.messages)`, appends the reply.
+- `graph.compile(checkpointer=InMemorySaver())` + fixed `config = {"configurable": {"thread_id": "my-bot-1"}}` so follow-ups share state.
+- CLI loop: `input("User: ")`, `graph.invoke({"messages": [{"role": "user", "content": query}]}, config)`, print `res["messages"][-1].content`. Type `quit`/`exit`/`bye` to stop.
+- Run with `python apps\langgraph_qnaChatbot.py` (needs `GROQ_API_KEY` in `.env`).
+
+### `apps/5_ragPdfAgent.py` — Streamlit PDF RAG (local uploads)
+
+- Upload UI: `st.file_uploader(type=["pdf"], accept_multiple_files=True)` saves to local `./doc_files/` (git-ignored, never commit — use your own PDFs).
+- `process_document(path)`: `PyPDFDirectoryLoader(path)` → `RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)` → `OllamaEmbeddings(model="nomic-embed-text")` → `InMemoryVectorStore.from_documents()`.
+- Agent: `ChatGroq(model="openai/gpt-oss-120b", temperature=0)` + `@tool retrieve_context(query: str)` (`similarity_search(k=3)`) + `create_agent(..., checkpointer=InMemorySaver())`.
+- Chat UI: `st.chat_input` → `agent.invoke({"messages": [...]}, {"configurable": {"thread_id": 1}})` → `response["messages"][-1].content`.
+- Run with `streamlit run apps\5_ragPdfAgent.py` (needs Ollama running + `ollama pull nomic-embed-text`, plus `GROQ_API_KEY`).
 
 ### `apps/sql_agent/` — SQL agent package (DB-agnostic, guarded)
 
@@ -341,6 +375,7 @@ Use exact strings. `openai/gpt-oss-20bopenai/gpt-oss-20b` (duplicated) gives 404
 14. `Error: Invalid value: File does not exist: apps\sql_agent\app.py` — your terminal is inside `apps\`, so the relative path fails. Either `cd ..` back to the repo root first, or run `streamlit run sql_agent\app.py` from `apps\`.
 15. `ImportError: pypdf package not found` at `PyPDFLoader(...).load()` in notebook 14 — fix with `pip install pypdf`.
 16. `ResponseError: pull model manifest: model 'nomic-embed-text' not found` in notebook 14 — the Ollama embedding model is not pulled yet. Fix with `ollama pull nomic-embed-text` (Ollama must be running).
+17. `NameError: name 'draw_mermaid_png' is not defined` at `Image(finalGraph.get_graph(), draw_mermaid_png())` in `notebooks/langraph_basic.ipynb` — `draw_mermaid_png()` is a method, not a global. Fix with `Image(finalGraph.get_graph().draw_mermaid_png())`.
 
 ## 11. Git and GitHub
 
@@ -354,7 +389,7 @@ git commit -m "message"
 git push -u origin main
 ```
 
-Never commit `env/`, `apps/.env`, `notebooks/.env`.
+Never commit `env/`, `apps/.env`, `notebooks/.env`, `apps/doc_files/`, or `*.pdf` uploads.
 
 ## 12. Security
 
